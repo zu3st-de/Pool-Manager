@@ -1,0 +1,532 @@
+blueprint:
+  name: Pool-Manager
+  description: >
+    Vollständige Poolpumpen-Steuerung.
+
+
+    ⚡ **DIREKT NUTZBAR:**
+
+    Einfach den Pumpen-Schalter auswählen, fertig!
+
+
+    🔧 **OPTIONALE HELPER (für Dashboard):**
+
+    Lege folgende Helper an und wähle sie unten aus:
+
+    - `input_boolean.pool_bath_pause_active` – Badepause-Status
+
+    - `input_number.pool_bath_pause_remaining` – Badepause-Restzeit (0-480, Schritt 1)
+
+    - `input_number.pool_manual_runtime_remaining` – Manuelle Filter-Restzeit (0-600, Schritt 1)
+
+
+    ℹ️ **HINWEIS:**
+
+    Wenn kein Temperatur-Sensor angegeben ist, wird von 20°C ausgegangen.
+
+  domain: automation
+  source_url: https://github.com/zu3st-de/Pool-Manager
+
+  input:
+    pump_switch:
+      name: Pumpen-Schalter
+      description: Der Schalter für die Poolpumpe
+      selector:
+        entity:
+          domain: switch
+
+    pool_volume:
+      name: Poolvolumen (Liter)
+      description: Gesamtvolumen des Pools in Litern
+      default: 50000
+      selector:
+        number:
+          min: 1000
+          max: 1000000
+          unit_of_measurement: L
+
+    pump_flow_rate:
+      name: Pumpendurchsatz (L/h)
+      description: Durchsatz der Poolpumpe in Litern pro Stunde
+      default: 10000
+      selector:
+        number:
+          min: 100
+          max: 100000
+          unit_of_measurement: L/h
+
+    # === ZEITFENSTER PRO WOCHENTAG ===
+    monday_start:
+      name: Montag - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    monday_end:
+      name: Montag - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    tuesday_start:
+      name: Dienstag - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    tuesday_end:
+      name: Dienstag - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    wednesday_start:
+      name: Mittwoch - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    wednesday_end:
+      name: Mittwoch - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    thursday_start:
+      name: Donnerstag - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    thursday_end:
+      name: Donnerstag - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    friday_start:
+      name: Freitag - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    friday_end:
+      name: Freitag - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    saturday_start:
+      name: Samstag - Startzeit
+      selector:
+        time:
+      default: "05:00:00"
+
+    saturday_end:
+      name: Samstag - Endzeit
+      selector:
+        time:
+      default: "23:00:00"
+
+    sunday_start:
+      name: Sonntag - Startzeit
+      selector:
+        time:
+      default: "05:00:00"
+
+    sunday_end:
+      name: Sonntag - Endzeit
+      selector:
+        time:
+      default: "23:00:00"
+
+    # === BADEPAUSE ===
+    bath_pause_duration:
+      name: Badepause-Dauer (Minuten)
+      description: Wie lange die Pumpe aus bleibt, wenn man sie manuell ausschaltet
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 480
+          step: 5
+          unit_of_measurement: min
+
+    # === MANUELLE FILTERUNG ===
+    manual_filter_duration:
+      name: Manuelle Filter-Dauer (Minuten)
+      description: Wie lange die Pumpe läuft, wenn man sie manuell einschaltet (außerhalb Zeitfenster)
+      default: 240
+      selector:
+        number:
+          min: 10
+          max: 600
+          step: 10
+          unit_of_measurement: min
+
+    # === OPTIONALE SENSOREN ===
+    temperature_sensor:
+      name: Wassertemperatur-Sensor (optional)
+      description: "Wird keiner angegeben, wird von 20°C ausgegangen"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
+    # === OPTIONALE HELPER FÜR DASHBOARD ===
+    bath_pause_active_entity:
+      name: Badepause-Aktiv (input_boolean, optional)
+      description: "Helper für Dashboard: input_boolean.pool_bath_pause_active"
+      default: ""
+      selector:
+        entity:
+          domain: input_boolean
+
+    bath_pause_remaining_entity:
+      name: Badepause-Restzeit (input_number, optional)
+      description: "Helper für Dashboard: input_number.pool_bath_pause_remaining (0-480)"
+      default: ""
+      selector:
+        entity:
+          domain: input_number
+
+    manual_runtime_remaining_entity:
+      name: Manuelle Filter-Restzeit (input_number, optional)
+      description: "Helper für Dashboard: input_number.pool_manual_runtime_remaining (0-600)"
+      default: ""
+      selector:
+        entity:
+          domain: input_number
+
+variables:
+  pump_switch: !input pump_switch
+  pool_volume: !input pool_volume
+  pump_flow: !input pump_flow_rate
+  temp_sensor: !input temperature_sensor
+  bath_duration: !input bath_pause_duration
+  filter_duration: !input manual_filter_duration
+  bath_active_entity: !input bath_pause_active_entity
+  bath_remaining_entity: !input bath_pause_remaining_entity
+  manual_remaining_entity: !input manual_runtime_remaining_entity
+
+  # Aktuelle Temperatur (mit Fallback 20°C)
+  water_temp: >
+    {% if temp_sensor != '' and states(temp_sensor) != 'unknown' %}
+      {{ states(temp_sensor) | float(20) }}
+    {% else %}
+      20
+    {% endif %}
+
+  # Ist die Badepause aktiv? (über Helper oder delay-Status)
+  bath_pause_active: >
+    {% if bath_active_entity != '' %}
+      {{ is_state(bath_active_entity, 'on') }}
+    {% else %}
+      false
+    {% endif %}
+
+trigger:
+  # Zeitfenster-Trigger
+  - platform: time
+    at: !input monday_start
+    id: "monday_start"
+  - platform: time
+    at: !input monday_end
+    id: "monday_end"
+  - platform: time
+    at: !input tuesday_start
+    id: "tuesday_start"
+  - platform: time
+    at: !input tuesday_end
+    id: "tuesday_end"
+  - platform: time
+    at: !input wednesday_start
+    id: "wednesday_start"
+  - platform: time
+    at: !input wednesday_end
+    id: "wednesday_end"
+  - platform: time
+    at: !input thursday_start
+    id: "thursday_start"
+  - platform: time
+    at: !input thursday_end
+    id: "thursday_end"
+  - platform: time
+    at: !input friday_start
+    id: "friday_start"
+  - platform: time
+    at: !input friday_end
+    id: "friday_end"
+  - platform: time
+    at: !input saturday_start
+    id: "saturday_start"
+  - platform: time
+    at: !input saturday_end
+    id: "saturday_end"
+  - platform: time
+    at: !input sunday_start
+    id: "sunday_start"
+  - platform: time
+    at: !input sunday_end
+    id: "sunday_end"
+
+  # Stündliche Prüfung
+  - platform: time_pattern
+    minutes: "0"
+    id: "hourly_check"
+
+  # Pumpe manuell ausgeschaltet (Badepause)
+  - platform: state
+    entity_id: !input pump_switch
+    to: "off"
+    id: "pump_turned_off"
+
+  # Pumpe manuell eingeschaltet (manuelle Filterung)
+  - platform: state
+    entity_id: !input pump_switch
+    to: "on"
+    id: "pump_turned_on"
+
+condition: []
+
+action:
+  - variables:
+      # Prüfen ob die Automation die Pumpe gesteuert hat oder der Benutzer
+      # Dazu: War der vorherige Zustand "an" und es ist ein Zeitfenster-Ende?
+      was_automated: >
+        {{ trigger.from_state is defined and
+           trigger.from_state.context is defined and
+           trigger.from_state.context.user_id is none }}
+
+  - choose:
+      # === BADEPAUSE: Pumpe manuell ausgeschaltet ===
+      - conditions:
+          - condition: trigger
+            id: "pump_turned_off"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ not was_automated }}"
+            then:
+              # Badepause aktivieren
+              - if:
+                  - condition: template
+                    value_template: "{{ bath_active_entity != '' }}"
+                then:
+                  - service: input_boolean.turn_on
+                    target:
+                      entity_id: "{{ bath_active_entity }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ bath_remaining_entity != '' }}"
+                then:
+                  - service: input_number.set_value
+                    target:
+                      entity_id: "{{ bath_remaining_entity }}"
+                    data:
+                      value: "{{ bath_duration }}"
+
+              # Warten (Badepause)
+              - delay:
+                  minutes: "{{ bath_duration }}"
+
+              # Nach Badepause: Pumpe wieder an (wenn Zeitfenster noch aktiv)
+              - if:
+                  - condition: template
+                    value_template: >
+                      {{ is_state(pump_switch, 'off') and
+                         as_timestamp(now()) < as_timestamp(today_at('{{ states('sensor.time') }}')) }}
+                then:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: "{{ pump_switch }}"
+
+              # Badepause deaktivieren
+              - if:
+                  - condition: template
+                    value_template: "{{ bath_active_entity != '' }}"
+                then:
+                  - service: input_boolean.turn_off
+                    target:
+                      entity_id: "{{ bath_active_entity }}"
+              - if:
+                  - condition: template
+                    value_template: "{{ bath_remaining_entity != '' }}"
+                then:
+                  - service: input_number.set_value
+                    target:
+                      entity_id: "{{ bath_remaining_entity }}"
+                    data:
+                      value: 0
+
+      # === MANUELLE FILTERUNG: Pumpe manuell eingeschaltet ===
+      - conditions:
+          - condition: trigger
+            id: "pump_turned_on"
+        sequence:
+          - if:
+              - condition: template
+                value_template: "{{ not was_automated }}"
+            then:
+              # Prüfen ob die Pumpe außerhalb des Zeitfensters eingeschaltet wurde
+              - variables:
+                  in_time_window: false
+              - if:
+                  - condition: template
+                    value_template: "{{ manual_remaining_entity != '' }}"
+                then:
+                  - service: input_number.set_value
+                    target:
+                      entity_id: "{{ manual_remaining_entity }}"
+                    data:
+                      value: "{{ filter_duration }}"
+
+              # Warten (manuelle Filterung)
+              - delay:
+                  minutes: "{{ filter_duration }}"
+
+              # Nach Filterung: Pumpe aus (außer Zeitfenster ist noch aktiv)
+              - if:
+                  - condition: template
+                    value_template: "{{ is_state(pump_switch, 'on') }}"
+                then:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: "{{ pump_switch }}"
+
+              - if:
+                  - condition: template
+                    value_template: "{{ manual_remaining_entity != '' }}"
+                then:
+                  - service: input_number.set_value
+                    target:
+                      entity_id: "{{ manual_remaining_entity }}"
+                    data:
+                      value: 0
+
+      # === ZEITFENSTER START ===
+      - conditions:
+          - condition: trigger
+            id:
+              - "monday_start"
+              - "tuesday_start"
+              - "wednesday_start"
+              - "thursday_start"
+              - "friday_start"
+              - "saturday_start"
+              - "sunday_start"
+        sequence:
+          # Wochentag prüfen
+          - condition: template
+            value_template: >
+              {% set day_map = {'monday':0,'tuesday':1,'wednesday':2,'thursday':3,'friday':4,'saturday':5,'sunday':6} %}
+              {% set trigger_id = trigger.id %}
+              {% set trigger_day = trigger_id.split('_')[0] %}
+              {{ day_map[trigger_day] == now().weekday() }}
+          # Keine Badepause aktiv
+          - if:
+              - condition: template
+                value_template: "{{ not bath_pause_active }}"
+            then:
+              - service: switch.turn_on
+                target:
+                  entity_id: "{{ pump_switch }}"
+
+      # === ZEITFENSTER ENDE ===
+      - conditions:
+          - condition: trigger
+            id:
+              - "monday_end"
+              - "tuesday_end"
+              - "wednesday_end"
+              - "thursday_end"
+              - "friday_end"
+              - "saturday_end"
+              - "sunday_end"
+        sequence:
+          # Wochentag prüfen
+          - condition: template
+            value_template: >
+              {% set day_map = {'monday':0,'tuesday':1,'wednesday':2,'thursday':3,'friday':4,'saturday':5,'sunday':6} %}
+              {% set trigger_id = trigger.id %}
+              {% set trigger_day = trigger_id.split('_')[0] %}
+              {{ day_map[trigger_day] == now().weekday() }}
+          # Nur ausschalten, wenn keine Badepause aktiv
+          - condition: template
+            value_template: "{{ not bath_pause_active }}"
+          - service: switch.turn_off
+            target:
+              entity_id: "{{ pump_switch }}"
+
+      # === STÜNDLICHE PRÜFUNG MIT LAUFZEIT-BERECHNUNG ===
+      - conditions:
+          - condition: trigger
+            id: "hourly_check"
+        sequence:
+          # Temperatur-Warnung (wenn kein Sensor)
+          - if:
+              - condition: template
+                value_template: "{{ temp_sensor == '' }}"
+            then:
+              - service: notify.persistent_notification
+                data:
+                  title: "🌡️ Pool-Manager: Kein Temperatursensor"
+                  message: >
+                    Es wurde kein Temperatursensor konfiguriert.
+                    Es wird von 20°C Wassertemperatur ausgegangen.
+                    Für optimale Filterung bitte einen Sensor angeben.
+
+          # Laufzeit-Berechnung basierend auf Temperatur
+          - variables:
+              current_temp: "{{ water_temp }}"
+
+              # Empfohlene Umwälzungen pro Tag
+              # Staffelung nach Temperatur:
+              # < 15°C: 1,0×  |  15-20°C: 1,5-2×  |  20-24°C: 2×  |  24-28°C: 2,5-3×  |  > 28°C: 3-4×
+              umwaelzungen: >
+                {% if current_temp < 15 %}
+                  1.0
+                {% elif current_temp <= 20 %}
+                  1.5
+                {% elif current_temp <= 24 %}
+                  2.0
+                {% elif current_temp <= 28 %}
+                  2.5
+                {% else %}
+                  3.0
+                {% endif %}
+
+              # Benötigte Laufzeit in Stunden
+              benoetigte_laufzeit_h: >
+                {{ ((umwaelzungen | float) * pool_volume / pump_flow) | round(1) }}
+
+              # Maximal verfügbare Laufzeit heute (laut Zeitfenster)
+              verfuegbare_laufzeit_h: >
+                {% set start = today_at(states('sensor.time')) %}
+                {% set ende = today_at('23:59') %}
+                {% set max_h = ((ende - start).seconds / 3600) | round(1) %}
+                {% if max_h > 18 %}18{% else %}{{ max_h }}{% endif %}
+
+              # Status
+              filter_status: >
+                {% if is_state(pump_switch, 'on') %}✅ Pumpe läuft{% else %}⏸️ Pumpe aus{% endif %}
+
+          # Benachrichtigung mit Zusammenfassung
+          - service: notify.persistent_notification
+            data:
+              title: "🏊 Pool-Manager: Status"
+              message: >
+                **Wassertemperatur:** {{ current_temp }}°C
+
+                **Empfohlene Umwälzungen:** {{ umwaelzungen }}× pro Tag
+
+                **Benötigte Laufzeit:** {{ benoetigte_laufzeit_h }} h
+
+                **Verfügbare Zeitfenster:** ~16 h 
+
+                **Status:** {{ filter_status }}
+
+                ℹ️ Bei {{ current_temp }}°C: {{ umwaelzungen }}× Umwälzung/Tag
+
+                💡 Tipp: Passe die Zeitfenster so an, dass die Pumpe
+                mindestens {{ benoetigte_laufzeit_h }} h pro Tag läuft.

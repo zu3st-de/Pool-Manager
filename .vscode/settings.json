@@ -1,0 +1,11 @@
+{
+    "yaml.schemas": {
+        "file:///c%3A/Users/simon/.vscode/extensions/continue.continue-1.2.22-win32-x64/config-yaml-schema.json": [
+            ".continue/**/*.yaml"
+        ],
+        "file:///c%3A/Users/langen/.vscode/extensions/continue.continue-1.2.22-win32-x64/config-yaml-schema.json": [
+            ".continue/**/*.yaml"
+        ],
+        "file:///c:/Users/langen/.vscode/extensions/continue.continue-1.2.22-win32-x64/config-yaml-schema.json": "file:///c%3A/Users/simon/.continue/config.yaml"
+    }
+}

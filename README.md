@@ -8,15 +8,15 @@ Ein umfassendes Blueprint-System zur vollautomatischen Verwaltung einer Poolpump
 - ✅ **Flexible Zeitfenster** pro Wochentag (z.B. Mo-Fr: 6-22 Uhr, Sa-So: 5-23 Uhr)
 - ✅ **Automatische Laufzeit-Berechnung** basierend auf Poolgröße, Durchsatz und Temperatur
 - ✅ **Intelligente Umwälzungs-Steuerung**: 1-3 Umwälzungen pro Tag je nach Wassertemperatur
-- ✅ **Temperaturbasierte Steuerung** (optional): Aktivierung/Deaktivierung bei Schwellwerten
 - ✅ **PV-Überschuss Nutzung**: Zusätzliche Filtration bei verfügbarem Solarstrom
 - ✅ **Badezeit-Modus**: Button zum Deaktivieren der Automation (z.B. 2h Badepause)
 - ✅ **Extra-Laufzeit**: Button für zusätzliche Pumpenlaufzeit (z.B. Stoßfiltration)
 
 ### 🧪 Chemie-Management (Optional)
-- ✅ **Chlor-Überwachung**: Automatische Empfehlungen für Zugabemengen
+- ✅ **Chlor-Überwachung**: Automatische Empfehlungen für **Chlor-Granulat** (in Gramm)
+- ✅ **Teststreifen-Eingabe**: Manuelle Eingabe bis zum BLE-Sensor
+- ✅ **BLE-YC01 Integration**: Automatische Messung (Chlor, PH, TDS, EC, ORP, Temperatur)
 - ✅ **PH-Kontrolle**: Berechnung von PH+ oder PH- Mengen
-- ✅ **Multitab-Dosierer**: Automatische Öffnung bei Bedarf
 - ✅ **Benachrichtigungen**: Alerts bei Abweichungen
 
 ### 🌦️ Wetter-Integration (Optional)
