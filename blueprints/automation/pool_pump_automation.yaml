@@ -1,0 +1,405 @@
+blueprint:
+  name: Pool Pumpen-Automation
+  description: >
+    Vollständige Automation zur Steuerung einer Poolpumpe basierend auf:
+    - Festgelegten Zeitfenstern pro Wochentag
+    - Wassertemperatur (optional)
+    - PV-Überschuss (optional)
+    - Manuellen Override-Modi (Badezeit, Extra-Laufzeit)
+  domain: automation
+  source_url: https://github.com/your-repo/pool-manager/blob/main/blueprints/pool_pump_automation.yaml
+
+  input:
+    # ==== GRUNDKONFIGURATION ====
+    pump_switch:
+      name: Pumpen-Schalter
+      description: Der Schalter für die Poolpumpe
+      selector:
+        entity:
+          domain: switch
+
+    pool_size_liters:
+      name: Poolgröße (Liter)
+      description: Gesamtvolumen des Pools in Litern
+      default: 50000
+      selector:
+        number:
+          min: 1000
+          max: 1000000
+          unit_of_measurement: L
+
+    pump_flow_rate:
+      name: Pumpendurchsatz (L/h)
+      description: Durchsatz der Poolpumpe in Litern pro Stunde
+      default: 10000
+      selector:
+        number:
+          min: 100
+          max: 100000
+          unit_of_measurement: L/h
+
+    # ==== ZEITFENSTER ====
+    time_windows_enabled:
+      name: Zeitfenster pro Wochentag aktivieren
+      description: Ermöglicht unterschiedliche Laufzeiten für verschiedene Wochentage
+      default: true
+      selector:
+        boolean:
+
+    monday_start:
+      name: Montag - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    monday_end:
+      name: Montag - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    tuesday_start:
+      name: Dienstag - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    tuesday_end:
+      name: Dienstag - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    wednesday_start:
+      name: Mittwoch - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    wednesday_end:
+      name: Mittwoch - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    thursday_start:
+      name: Donnerstag - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    thursday_end:
+      name: Donnerstag - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    friday_start:
+      name: Freitag - Startzeit
+      selector:
+        time:
+      default: "06:00:00"
+
+    friday_end:
+      name: Freitag - Endzeit
+      selector:
+        time:
+      default: "22:00:00"
+
+    saturday_start:
+      name: Samstag - Startzeit
+      selector:
+        time:
+      default: "05:00:00"
+
+    saturday_end:
+      name: Samstag - Endzeit
+      selector:
+        time:
+      default: "23:00:00"
+
+    sunday_start:
+      name: Sonntag - Startzeit
+      selector:
+        time:
+      default: "05:00:00"
+
+    sunday_end:
+      name: Sonntag - Endzeit
+      selector:
+        time:
+      default: "23:00:00"
+
+    # ==== TEMPERATUR-STEUERUNG (OPTIONAL) ====
+    temperature_enabled:
+      name: Temperatur-basierte Steuerung aktivieren
+      description: Die Pumpe passt sich an die Wassertemperatur an
+      default: false
+      selector:
+        boolean:
+
+    water_temperature_sensor:
+      name: Wasser-Temperatur-Sensor
+      description: Sensor für die Wassertemperatur
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
+    temperature_thresholds:
+      name: Temperatur-Schwellwerte
+      description: |
+        Bei dieser Temp. und darunter: Pumpe AUS
+        Bei dieser Temp. und darüber: Pumpe AN
+      default:
+        - 18
+        - 24
+      selector:
+        object:
+
+    # ==== PV-ÜBERSCHUSS (OPTIONAL) ====
+    pv_excess_enabled:
+      name: PV-Überschuss nutzen
+      description: Zusätzliche Pumpenlaufzeit bei PV-Überschuss
+      default: false
+      selector:
+        boolean:
+
+    pv_excess_sensor:
+      name: PV-Überschuss-Sensor
+      description: Sensor für verfügbaren PV-Überschuss in W
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
+    pv_excess_threshold:
+      name: PV-Überschuss Schwellwert (W)
+      description: Ab dieser Leistung wird die Pumpe zusätzlich eingeschaltet
+      default: 2000
+      selector:
+        number:
+          min: 0
+          max: 50000
+          unit_of_measurement: W
+
+    # ==== BADEZEIT-OVERRIDE ====
+    bath_time_button:
+      name: Badezeit-Button
+      description: Button zum Aktivieren des Badezeit-Modus (deaktiviert Automation)
+      selector:
+        entity:
+          domain: input_button
+
+    bath_time_duration:
+      name: Badezeit-Dauer (Minuten)
+      description: Wie lange die Automation ausgesetzt wird
+      default: 120
+      selector:
+        number:
+          min: 10
+          max: 1440
+          unit_of_measurement: min
+
+    # ==== EXTRA-LAUFZEIT BUTTON ====
+    extra_runtime_button:
+      name: Extra-Laufzeit Button
+      description: Button für zusätzliche Pumpenlaufzeit
+      selector:
+        entity:
+          domain: input_button
+
+    extra_runtime_duration:
+      name: Extra-Laufzeit-Dauer (Minuten)
+      description: Wie lange die Pumpe zusätzlich läuft
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 600
+          unit_of_measurement: min
+
+variables:
+  pump_switch: !input pump_switch
+  pool_size: !input pool_size_liters
+  pump_flow: !input pump_flow_rate
+  time_windows_enabled: !input time_windows_enabled
+  temp_enabled: !input temperature_enabled
+  water_temp_sensor: !input water_temperature_sensor
+  pv_enabled: !input pv_excess_enabled
+  pv_sensor: !input pv_excess_sensor
+  pv_threshold: !input pv_excess_threshold
+  bath_button: !input bath_time_button
+  bath_duration: !input bath_time_duration
+  extra_button: !input extra_runtime_button
+  extra_duration: !input extra_runtime_duration
+
+trigger:
+  # Tägliche Zeitfenster-Trigger
+  - platform: time
+    at: !input monday_start
+    id: "time_window_start"
+  - platform: time
+    at: !input monday_end
+    id: "time_window_end"
+  - platform: time
+    at: !input tuesday_start
+    id: "time_window_start"
+  - platform: time
+    at: !input tuesday_end
+    id: "time_window_end"
+  - platform: time
+    at: !input wednesday_start
+    id: "time_window_start"
+  - platform: time
+    at: !input wednesday_end
+    id: "time_window_end"
+  - platform: time
+    at: !input thursday_start
+    id: "time_window_start"
+  - platform: time
+    at: !input thursday_end
+    id: "time_window_end"
+  - platform: time
+    at: !input friday_start
+    id: "time_window_start"
+  - platform: time
+    at: !input friday_end
+    id: "time_window_end"
+  - platform: time
+    at: !input saturday_start
+    id: "time_window_start"
+  - platform: time
+    at: !input saturday_end
+    id: "time_window_end"
+  - platform: time
+    at: !input sunday_start
+    id: "time_window_start"
+  - platform: time
+    at: !input sunday_end
+    id: "time_window_end"
+
+  # Temperatur-Trigger
+  - platform: state
+    entity_id: !input water_temperature_sensor
+    id: "temperature_change"
+
+  # PV-Überschuss-Trigger
+  - platform: state
+    entity_id: !input pv_excess_sensor
+    id: "pv_excess_change"
+
+  # Button-Trigger
+  - platform: state
+    entity_id: !input bath_time_button
+    id: "bath_time_activated"
+
+  - platform: state
+    entity_id: !input extra_runtime_button
+    id: "extra_runtime_activated"
+
+condition:
+  # Badezeit-Modus-Check
+  - condition: template
+    value_template: >
+      {{ not is_state('input_boolean.pool_bath_time_active', 'on') }}
+
+action:
+  - choose:
+      # Badezeit aktivieren
+      - conditions:
+          - condition: trigger
+            id: "bath_time_activated"
+        sequence:
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.pool_bath_time_active
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.pool_bath_time_remaining
+            data:
+              value: "{{ bath_duration }}"
+
+      # Extra-Laufzeit aktivieren
+      - conditions:
+          - condition: trigger
+            id: "extra_runtime_activated"
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: "{{ pump_switch }}"
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.pool_extra_runtime_remaining
+            data:
+              value: "{{ extra_duration }}"
+
+      # Zeitfenster Start
+      - conditions:
+          - condition: trigger
+            id: "time_window_start"
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: "{{ pump_switch }}"
+
+      # Zeitfenster Ende
+      - conditions:
+          - condition: trigger
+            id: "time_window_end"
+        sequence:
+          - condition: template
+            value_template: >
+              {% if pv_enabled %}
+                {{ states(pv_sensor) | float(0) < pv_threshold }}
+              {% else %}
+                true
+              {% endif %}
+          - service: switch.turn_off
+            target:
+              entity_id: "{{ pump_switch }}"
+
+      # Temperatur-Steuerung
+      - conditions:
+          - condition: trigger
+            id: "temperature_change"
+          - condition: template
+            value_template: "{{ temp_enabled }}"
+        sequence:
+          - choose:
+              # Temperatur zu niedrig
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ states(water_temp_sensor) | float(20) < 18 }}
+                sequence:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: "{{ pump_switch }}"
+              # Temperatur optimal
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ states(water_temp_sensor) | float(20) >= 18 and 
+                         states(water_temp_sensor) | float(20) <= 26 }}
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: "{{ pump_switch }}"
+
+      # PV-Überschuss-Steuerung
+      - conditions:
+          - condition: trigger
+            id: "pv_excess_change"
+          - condition: template
+            value_template: "{{ pv_enabled }}"
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ states(pv_sensor) | float(0) >= pv_threshold }}
+                sequence:
+                  - service: switch.turn_on
+                    target:
+                      entity_id: "{{ pump_switch }}"

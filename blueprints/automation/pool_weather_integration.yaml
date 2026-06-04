@@ -1,0 +1,255 @@
+blueprint:
+  name: Pool Wetterdienst-Integration
+  description: >
+    Optionale Integration von Wetterdaten zur Poolzerwaltung:
+    - Warnung vor Regen (Pumpe kann ausbleiben)
+    - Erhöhte Pumpenlaufzeit bei Sonnenschein
+    - Temperaturvorhersage-basierte Anpassungen
+    - Warnung vor extremem Wetter
+  domain: automation
+  source_url: https://github.com/your-repo/pool-manager/blob/main/blueprints/pool_weather_integration.yaml
+
+  input:
+    # ==== WETTERDIENST ====
+    weather_entity:
+      name: Wetter-Entity
+      description: "z.B. weather.home oder ein OpenWeatherMap-Integration"
+      selector:
+        entity:
+          domain: weather
+
+    # ==== REGENERKENNUNG ====
+    rain_alert_enabled:
+      name: Regen-Warnung aktivieren
+      default: true
+      selector:
+        boolean:
+
+    rain_warning_entity:
+      name: Regen-Sensor (Optional)
+      description: "Sensor für Regen/Niederschlag (z.B. mm/h)"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
+    rain_threshold:
+      name: Regen-Schwellwert (mm/h)
+      default: 2.0
+      selector:
+        number:
+          min: 0.1
+          max: 50
+          step: 0.5
+          unit_of_measurement: mm/h
+
+    # ==== SONNENSCHEIN-STEUERUNG ====
+    sun_intensity_enabled:
+      name: Sonnenschein-basierte Steuerung
+      default: false
+      selector:
+        boolean:
+
+    uv_index_sensor:
+      name: UV-Index Sensor (Optional)
+      description: "Für Stärke der Sonneneinstrahlung"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
+    high_sun_extra_runtime:
+      name: Extra-Laufzeit bei Sonnenschein (Minuten)
+      default: 60
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: min
+
+    # ==== TEMPERATURVORHERSAGE ====
+    temp_forecast_enabled:
+      name: Temperaturvorhersage nutzen
+      default: false
+      selector:
+        boolean:
+
+    # ==== NOTFALL-WETTER ====
+    storm_alert_enabled:
+      name: Unwetter-Warnung aktivieren
+      default: true
+      selector:
+        boolean:
+
+    notification_service:
+      name: Benachrichtigungs-Service
+      default: "notify.persistent_notification"
+      selector:
+        text:
+
+    pump_entity:
+      name: Pumpen-Schalter-Entity (für Unwetter-Abschaltung)
+      selector:
+        entity:
+          domain: switch
+
+variables:
+  weather_entity: !input weather_entity
+  rain_enabled: !input rain_alert_enabled
+  rain_sensor: !input rain_warning_entity
+  rain_threshold: !input rain_threshold
+  sun_enabled: !input sun_intensity_enabled
+  uv_sensor: !input uv_index_sensor
+  sun_extra_time: !input high_sun_extra_runtime
+  temp_forecast: !input temp_forecast_enabled
+  storm_enabled: !input storm_alert_enabled
+  notify_service: !input notification_service
+  pump_entity: !input pump_entity
+
+trigger:
+  # Wetter-Änderung
+  - platform: state
+    entity_id: !input weather_entity
+    id: "weather_changed"
+
+  # Regen-Sensor Änderung
+  - platform: state
+    entity_id: !input rain_warning_entity
+    id: "rain_detected"
+
+  # UV-Index Änderung
+  - platform: state
+    entity_id: !input uv_index_sensor
+    id: "sun_intensity_changed"
+
+  # Stündliche Überprüfung
+  - platform: time_pattern
+    minutes: "0"
+    id: "hourly_check"
+
+condition: []
+
+action:
+  - choose:
+      # Wetter-Analyse
+      - conditions:
+          - condition: trigger
+            id: "weather_changed"
+        sequence:
+          - variables:
+              current_condition: "{{ states(weather_entity) }}"
+              is_rainy: "{{ current_condition in ['rainy', 'pouring', 'sleet', 'hail'] }}"
+              is_stormy: "{{ current_condition in ['thunderstorm', 'lightning'] }}"
+              is_sunny: "{{ current_condition in ['sunny', 'clear-night'] }}"
+
+          # Unwetter-Warnung
+          - if:
+              - condition: template
+                value_template: "{{ is_stormy and storm_enabled }}"
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: "⚠️ POOL-UNWETTER-WARNUNG"
+                  message: "Schweres Gewitter im Anmarsch! Pumpe wird ausgeschaltet. Abdeckung prüfen!"
+
+              - service: switch.turn_off
+                target:
+                  entity_id: "{{ pump_entity }}"
+
+          # Regen-Warnung
+          - if:
+              - condition: template
+                value_template: "{{ is_rainy and rain_enabled }}"
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: "🌧️ Regen erkannt"
+                  message: >
+                    Regen im Anmarsch/aktiv.
+                    Die Pumpe läuft trotzdem, aber Süßwasser-Eintrag wird erhöht.
+
+          # Sonnenschein-Information
+          - if:
+              - condition: template
+                value_template: "{{ is_sunny }}"
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: "☀️ Sonniges Wetter"
+                  message: >
+                    Perfekt für Pool! Zusätzliche Pumpenlaufzeit aktiviert.
+
+      # Regen-Detektion
+      - conditions:
+          - condition: trigger
+            id: "rain_detected"
+          - condition: template
+            value_template: "{{ rain_enabled }}"
+        sequence:
+          - variables:
+              rain_value: "{{ states(rain_sensor) | float(0) }}"
+
+          - if:
+              - condition: template
+                value_template: "{{ rain_value >= rain_threshold }}"
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: "🌧️ REGEN-ALARM"
+                  message: "Niederschlag: {{ rain_value }} mm/h (Schwellwert: {{ rain_threshold }} mm/h)"
+
+      # Sonnenschein-Steuerung
+      - conditions:
+          - condition: trigger
+            id: "sun_intensity_changed"
+          - condition: template
+            value_template: "{{ sun_enabled }}"
+        sequence:
+          - variables:
+              uv_index: "{{ states(uv_sensor) | float(0) }}"
+
+          - if:
+              - condition: template
+                value_template: "{{ uv_index >= 6 }}"
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: "☀️ Hohe Sonneneinstrahlung"
+                  message: >
+                    UV-Index: {{ uv_index }}
+                    Empfehlung: Zusätzliche Pumpenlaufzeit ist aktiviert.
+
+      # Stündliche Überprüfung
+      - conditions:
+          - condition: trigger
+            id: "hourly_check"
+        sequence:
+          - variables:
+              current_condition: "{{ states(weather_entity) }}"
+              forecast_today: "{{ state_attr(weather_entity, 'forecast')[0] if state_attr(weather_entity, 'forecast') else none }}"
+
+          - if:
+              - condition: template
+                value_template: >
+                  {{ forecast_today and 
+                     forecast_today.condition in ['rainy', 'pouring', 'thunderstorm'] }}
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: "🌧️ Regenvorhersage"
+                  message: >
+                    Heute wird Regen erwartet.
+                    Poolzudeckung überprüfen!
+
+          - if:
+              - condition: template
+                value_template: >
+                  {{ forecast_today and 
+                     forecast_today.temperature > 28 }}
+            then:
+              - service: "{{ notify_service }}"
+                data:
+                  title: "🌡️ Heißer Tag voraus"
+                  message: >
+                    Heute wird es heiß ({{ forecast_today.temperature }}°C).
+                    Pool wird gründlich durchgewälzt!

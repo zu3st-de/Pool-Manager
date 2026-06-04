@@ -1,0 +1,233 @@
+# Home Assistant Configuration für Pool-Manager
+# Diese Datei enthält alle notwendigen Entities und Helfer für das Pool-Manager System
+# Kopiere den relevanten Inhalt in deine configuration.yaml oder nutze ein separates Include
+
+# ============================================================
+# INPUT HELPER - Für Override-Modi und Konfiguration
+# ============================================================
+
+input_boolean:
+  pool_bath_time_active:
+    name: Badezeit Aktiv
+    icon: mdi:swim
+    initial: false
+
+  pool_automation_paused:
+    name: Pool Automation Pausiert
+    icon: mdi:pause
+    initial: false
+
+input_number:
+  pool_bath_time_remaining:
+    name: Badezeit - Verbleibende Zeit
+    unit_of_measurement: min
+    min: 0
+    max: 240
+    step: 1
+    icon: mdi:timer
+
+  pool_extra_runtime_remaining:
+    name: Extra-Laufzeit - Verbleibende Zeit
+    unit_of_measurement: min
+    min: 0
+    max: 600
+    step: 1
+    icon: mdi:timer-plus
+
+  pool_pump_min_runtime:
+    name: Minimale tägliche Pumpenlaufzeit
+    unit_of_measurement: h
+    min: 1
+    max: 24
+    step: 0.5
+    value: 8
+    icon: mdi:water-pump
+
+  pool_target_temperature:
+    name: Zieltemperatur
+    unit_of_measurement: "°C"
+    min: 15
+    max: 35
+    step: 0.5
+    value: 24
+    icon: mdi:thermometer
+
+input_button:
+  pool_bath_time:
+    name: Badezeit - Aktivieren
+    icon: mdi:swim
+
+  pool_extra_runtime:
+    name: Extra-Laufzeit - Starten
+    icon: mdi:timer-plus
+
+  pool_maintenance_mode:
+    name: Wartungsmodus
+    icon: mdi:wrench
+
+input_select:
+  pool_pump_mode:
+    name: Pumpen-Modus
+    options:
+      - Auto
+      - Immer An
+      - Immer Aus
+      - Nur Zeitfenster
+    initial: Auto
+    icon: mdi:water-pump
+
+# ============================================================
+# TEMPLATE SENSORS - Berechnete Werte
+# ============================================================
+
+template:
+  - sensor:
+      - name: "Pool - Pumpen Laufzeit heute"
+        unit_of_measurement: "h"
+        icon: mdi:water-pump
+        unique_id: pool_pump_runtime_today
+        state: >
+          {% if state_attr('automation.pool_pumpe', 'last_triggered') != none %}
+            {{ (now() - state_attr('automation.pool_pumpe', 'last_triggered')).total_seconds() / 3600 | round(2) }}
+          {% else %}
+            0
+          {% endif %}
+
+      - name: "Pool - Wasser-Umwälzrate"
+        unit_of_measurement: "%"
+        icon: mdi:percent
+        unique_id: pool_circulation_rate
+        state: >
+          {% if states('input_number.pool_pump_min_runtime') != 'unknown' %}
+            {% set min_runtime = states('input_number.pool_pump_min_runtime') | float(8) %}
+            {% set current_runtime = states('sensor.pool_pumpen_laufzeit_heute') | float(0) %}
+            {{ ((current_runtime / min_runtime) * 100) | round(1) }}
+          {% else %}
+            0
+          {% endif %}
+
+      - name: "Pool - Nächste Aktivierung"
+        icon: mdi:alarm
+        unique_id: pool_next_activation
+        state: >
+          {% set today = now().weekday() %}
+          {% if today == 0 %}
+            Montag: ab 06:00
+          {% elif today == 1 %}
+            Dienstag: ab 06:00
+          {% elif today == 2 %}
+            Mittwoch: ab 06:00
+          {% elif today == 3 %}
+            Donnerstag: ab 06:00
+          {% elif today == 4 %}
+            Freitag: ab 06:00
+          {% elif today == 5 %}
+            Samstag: ab 05:00
+          {% else %}
+            Sonntag: ab 05:00
+          {% endif %}
+
+      - name: "Pool - Chlor Empfehlung"
+        icon: mdi:flask
+        unique_id: pool_chlorine_recommendation
+        state: >
+          {% if states('sensor.pool_chlor') != 'unknown' %}
+            {% set chlor = states('sensor.pool_chlor') | float(0) %}
+            {% if chlor < 0.5 %}
+              🚨 KRITISCH! Sofort Chlor zugeben!
+            {% elif chlor < 1.0 %}
+              ⚠️ Zu niedrig - Chlor zugeben
+            {% elif chlor > 3.0 %}
+              ℹ️ Zu hoch - Warten Sie, bis es sinkt
+            {% else %}
+              ✅ Optimal
+            {% endif %}
+          {% else %}
+            Sensor nicht verbunden
+          {% endif %}
+
+      - name: "Pool - PH Empfehlung"
+        icon: mdi:flask
+        unique_id: pool_ph_recommendation
+        state: >
+          {% if states('sensor.pool_ph') != 'unknown' %}
+            {% set ph = states('sensor.pool_ph') | float(7.0) %}
+            {% if ph < 7.0 %}
+              ⚠️ Zu niedrig (sauer) - PH+ zugeben
+            {% elif ph > 7.6 %}
+              ⚠️ Zu hoch (basisch) - PH- zugeben
+            {% else %}
+              ✅ Optimal
+            {% endif %}
+          {% else %}
+            Sensor nicht verbunden
+          {% endif %}
+
+# ============================================================
+# AUTOMATIONEN - Helfer für Timer und Status
+# ============================================================
+
+automation:
+  - alias: "Pool - Badezeit Timer Countdown"
+    description: "Zählt die Badezeit-Dauer herunter"
+    trigger:
+      - platform: time_pattern
+        minutes: "/1"
+    condition:
+      - condition: state
+        entity_id: input_boolean.pool_bath_time_active
+        state: "on"
+    action:
+      - variables:
+          current_value: "{{ (states('input_number.pool_bath_time_remaining') | float(0)) | int }}"
+      - if:
+          - condition: template
+            value_template: "{{ current_value <= 0 }}"
+        then:
+          - service: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.pool_bath_time_active
+        else:
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.pool_bath_time_remaining
+            data:
+              value: "{{ current_value - 1 }}"
+
+  - alias: "Pool - Extra-Laufzeit Timer Countdown"
+    description: "Zählt die Extra-Laufzeit herunter"
+    trigger:
+      - platform: time_pattern
+        minutes: "/1"
+    condition:
+      - condition: template
+        value_template: "{{ (states('input_number.pool_extra_runtime_remaining') | float(0)) > 0 }}"
+    action:
+      - variables:
+          current_value: "{{ (states('input_number.pool_extra_runtime_remaining') | float(0)) | int }}"
+      - if:
+          - condition: template
+            value_template: "{{ current_value <= 0 }}"
+        then:
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.pool_extra_runtime_remaining
+            data:
+              value: 0
+        else:
+          - service: input_number.set_value
+            target:
+              entity_id: input_number.pool_extra_runtime_remaining
+            data:
+              value: "{{ current_value - 1 }}"
+
+# ============================================================
+# NOTIFICATIONS (Optional - Customize für dein System)
+# ============================================================
+
+# Beispiel für Mobile App Benachrichtigungen:
+# Unter deinem Home Assistant Benutzer -> Einstellungen -> Geräte & Services
+# sollte automatisch notify.mobile_app_[dein_handy] zur Verfügung stehen
+
+# Persistent Notifications sind immer verfügbar unter:
+# notify.persistent_notification

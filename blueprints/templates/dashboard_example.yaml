@@ -1,0 +1,278 @@
+# Pool-Manager Dashboard Beispiel
+# Dieser YAML-Code kann in eine LoVeLace View kopiert werden oder als Dashboard gespeichert werden
+# Einstellungen > Dashboards > Erstelle ein neues Dashboard > Bearbeite als YAML > Kopiere diesen Inhalt
+
+title: Pool-Manager
+views:
+  - title: Übersicht
+    path: pool-overview
+    cards:
+      # ==== STATUS KARTEN ====
+      - type: vertical-stack
+        cards:
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: switch.pool_pump
+                name: Pumpe
+                icon: mdi:water-pump
+                state:
+                  - value: "on"
+                    color: rgb(0, 200, 0)
+                  - value: "off"
+                    color: rgb(200, 0, 0)
+
+              - type: custom:button-card
+                entity: sensor.pool_water_temperature
+                name: Temperatur
+                icon: mdi:thermometer
+                template:
+                  - history_graph
+                show_state: true
+
+              - type: custom:button-card
+                entity: sensor.pool_chlorine
+                name: Chlor
+                icon: mdi:flask
+                state:
+                  - value: "low"
+                    color: rgb(200, 0, 0)
+                  - value: "ok"
+                    color: rgb(0, 200, 0)
+                  - value: "high"
+                    color: rgb(200, 200, 0)
+
+      # ==== PUMPEN-STEUERUNG ====
+      - type: vertical-stack
+        cards:
+          - type: heading
+            heading: Pumpen-Steuerung
+
+          - type: entities
+            entities:
+              - entity: switch.pool_pump
+                name: Pumpe
+                icon: mdi:water-pump
+
+              - entity: input_boolean.pool_bath_time_active
+                name: Badezeit Aktiv
+                icon: mdi:swim
+
+              - entity: input_number.pool_bath_time_remaining
+                name: Badezeit verbleibend
+                icon: mdi:timer
+
+              - entity: input_number.pool_extra_runtime_remaining
+                name: Extra-Laufzeit verbleibend
+                icon: mdi:timer-plus
+
+      # ==== SCHNELL-AKTIONEN ====
+      - type: vertical-stack
+        cards:
+          - type: heading
+            heading: Schnell-Aktionen
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: input_button.pool_bath_time
+                name: 🏊 Badezeit
+                size: 20%
+                hold_action:
+                  action: call-service
+                  service: input_button.press
+                  target:
+                    entity_id: input_button.pool_bath_time
+
+              - type: custom:button-card
+                entity: input_button.pool_extra_runtime
+                name: ⏱️ Extra-Laufzeit
+                size: 20%
+                hold_action:
+                  action: call-service
+                  service: input_button.press
+                  target:
+                    entity_id: input_button.pool_extra_runtime
+
+  # ==== CHEMIE TAB ====
+  - title: Chemie
+    path: pool-chemistry
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: heading
+            heading: Pool-Chemie Übersicht
+
+          - type: horizontal-stack
+            cards:
+              - type: gauge
+                entity: sensor.pool_chlorine
+                min: 0
+                max: 5
+                unit: ppm
+                needle: true
+                thresholds:
+                  - value: 0.5
+                    color: "darkred"
+                  - value: 1
+                    color: "red"
+                  - value: 3
+                    color: "green"
+                  - value: 5
+                    color: "orange"
+
+              - type: gauge
+                entity: sensor.pool_ph
+                min: 6
+                max: 8
+                needle: true
+                thresholds:
+                  - value: 6.8
+                    color: "orange"
+                  - value: 7
+                    color: "green"
+                  - value: 7.6
+                    color: "green"
+                  - value: 7.8
+                    color: "orange"
+
+          # ==== EMPFEHLUNGEN ====
+          - type: markdown
+            content: |
+              ## Chlor-Status
+              {{ state_attr('sensor.pool_chlor_empfehlung', 'state') }}
+
+              ## PH-Status
+              {{ state_attr('sensor.pool_ph_empfehlung', 'state') }}
+
+          # ==== MULTITAB-DOSIERER (Optional) ====
+          - type: entities
+            title: Multitab-Dosierer
+            entities:
+              - entity: input_number.pool_multitab_position
+                name: Öffnungsgrad
+                icon: mdi:valve
+
+  # ==== WETTER TAB ====
+  - title: Wetter
+    path: pool-weather
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: heading
+            heading: Wetter-Integration
+
+          - type: weather-forecast
+            entity: weather.home
+
+          - type: horizontal-stack
+            cards:
+              - type: gauge
+                entity: sensor.uv_index
+                min: 0
+                max: 12
+                unit: ""
+                thresholds:
+                  - value: 0
+                    color: "green"
+                  - value: 5
+                    color: "yellow"
+                  - value: 8
+                    color: "orange"
+                  - value: 11
+                    color: "red"
+
+              - type: sensor
+                entity: sensor.rain_detected
+                detail: minimal
+
+  # ==== STATISTIK TAB ====
+  - title: Statistiken
+    path: pool-statistics
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: heading
+            heading: Laufzeit und Verbrauch
+
+          - type: history-graph
+            entities:
+              - entity: switch.pool_pump
+                name: Pumpe
+              - entity: sensor.pool_water_temperature
+                name: Temperatur
+              - entity: sensor.pool_chlorine
+                name: Chlor
+            hours_to_show: 168
+
+          - type: entities
+            entities:
+              - entity: sensor.pool_pumpen_laufzeit_heute
+                name: Laufzeit heute
+
+              - entity: sensor.pool_wasser_umwälzrate
+                name: Umwälzrate
+
+              - entity: sensor.pool_next_activation
+                name: Nächste Aktivierung
+
+  # ==== EINSTELLUNGEN TAB ====
+  - title: Einstellungen
+    path: pool-settings
+    cards:
+      - type: vertical-stack
+        cards:
+          - type: heading
+            heading: Konfiguration
+
+          - type: entities
+            entities:
+              - entity: input_number.pool_target_temperature
+                name: Zieltemperatur
+
+              - entity: input_number.pool_pump_min_runtime
+                name: Min. tägliche Laufzeit
+
+              - entity: input_select.pool_pump_mode
+                name: Pumpen-Modus
+
+              - entity: input_boolean.pool_automation_paused
+                name: Automation pausiert
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: input_button.pool_maintenance_mode
+                name: 🔧 Wartungsmodus
+
+              - type: custom:button-card
+                entity: input_button.pool_reset_daily_stats
+                name: 📊 Stats zurücksetzen
+
+# ==== CONDITIONAL CARDS (Zeige nur wenn Sensoren verfügbar) ====
+# Diese Karten werden nur angezeigt, wenn die Sensoren existieren:
+
+# Wenn Temperatur-Sensor vorhanden:
+#     - type: custom:card-mod
+#       card:
+#         type: temperature
+#       style:
+#         visibility: >
+#           {% if states('sensor.pool_water_temperature') != 'unknown' %}
+#             visible
+#           {% else %}
+#             hidden
+#           {% endif %}
+
+# Wenn Chlor-Sensor vorhanden:
+#     - type: custom:card-mod
+#       card:
+#         type: gauge
+#         entity: sensor.pool_chlorine
+#       style:
+#         visibility: >
+#           {% if states('sensor.pool_chlorine') != 'unknown' %}
+#             visible
+#           {% else %}
+#             hidden
+#           {% endif %}
