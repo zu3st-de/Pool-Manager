@@ -119,6 +119,51 @@ sensor:
     unit_of_measurement: "W"
 ```
 
+### Automatische Laufzeit-Berechnung (Neu!)
+
+Das System berechnet automatisch die **empfohlene Filterlaufzeit** basierend auf:
+- **Poolgröße** (Liter)
+- **Pumpendurchsatz** (L/h)
+- **Wassertemperatur** (°C)
+
+#### Funktionsweise
+
+Die Berechnung nutzt das Konzept der **Umwälzungen** (wie oft pro Tag das gesamte Wasser durch den Filter gepumpt wird):
+
+$$\text{Laufzeit (h)} = \frac{\text{Poolgröße (L)} \times \text{Umwälzungen}}{\text{Pumpendurchsatz (L/h)}}$$
+
+#### Temperatur-Abhängige Umwälzungen
+
+| Temperatur | Umwälzungen | Laufzeit | Zweck |
+|------------|------------|---------|-------|
+| < 18°C | 1,0 | 6-8h | Minimale Filterung |
+| 18-22°C | 1,25 | 8-10h | Frühjahr/Herbst |
+| 22-26°C | 1,75 | 10-12h | Sommer Normal |
+| 26-30°C | 2,5 | 12-16h | Heißer Sommer |
+| > 30°C | ∞ | 24h | Hochsommer/Dauerbetrieb |
+
+#### Beispiele
+
+**Beispiel 1: 50.000L Pool, 10.000 L/h Pumpe, 24°C**
+- Umwälzungen: 1,75 (22-26°C Bereich)
+- Laufzeit = (50.000 × 1,75) / 10.000 = **8,75 Stunden**
+
+**Beispiel 2: 80.000L Pool, 15.000 L/h Pumpe, 28°C**
+- Umwälzungen: 2,5 (26-30°C Bereich)
+- Laufzeit = (80.000 × 2,5) / 15.000 = **13,33 Stunden**
+
+#### Konfiguration
+
+Im Dashboard unter **Einstellungen**:
+- `pool_size_config`: Poolgröße in Litern
+- `pool_pump_flow_config`: Pumpendurchsatz in L/h
+- `pool_current_temperature`: Aktuelle Wassertemperatur
+
+Die empfohlene Laufzeit wird automatisch berechnet:
+- **Sensor:** `sensor.pool_recommended_runtime`
+- **Kategorie:** `sensor.pool_temperature_category`
+- **Umwälzungen:** `sensor.pool_umwälzungen_pro_tag`
+
 ---
 
 ## 🏊 Verwendung

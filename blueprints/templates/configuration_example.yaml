@@ -51,6 +51,33 @@ input_number:
     step: 0.5
     value: 24
     icon: mdi:thermometer
+    
+  pool_size_config:
+    name: Pool-Größe (L) - Konfiguration
+    unit_of_measurement: L
+    min: 1000
+    max: 1000000
+    step: 1000
+    value: 50000
+    icon: mdi:water-volume
+    
+  pool_pump_flow_config:
+    name: Pumpendurchsatz (L/h) - Konfiguration
+    unit_of_measurement: L/h
+    min: 100
+    max: 100000
+    step: 100
+    value: 10000
+    icon: mdi:water-pump
+    
+  pool_current_temperature:
+    name: Aktuelle Wasser-Temperatur
+    unit_of_measurement: "°C"
+    min: 5
+    max: 40
+    step: 0.1
+    value: 24
+    icon: mdi:thermometer
 
 input_button:
   pool_bath_time:
@@ -76,8 +103,22 @@ input_select:
     initial: Auto
     icon: mdi:water-pump
 
+# ==== TEMPLATE SENSORS - Berechnete Werte
 # ============================================================
-# TEMPLATE SENSORS - Berechnete Werte
+# Diese Sensoren berechnen automatisch:
+# 1. Empfohlene tägliche Filterlaufzeit (basierend auf Poolgröße, Durchsatz, Temperatur)
+# 2. Temperatur-Kategorie mit Empfehlungen
+# 3. Umwälzungen pro Tag
+#
+# FORMEL FÜR LAUFZEIT:
+# Laufzeit (h) = (Poolgröße L × Umwälzungen) / Pumpendurchsatz L/h
+#
+# UMWÄLZUNGEN NACH TEMPERATUR:
+# < 18°C   → 1,0 Umwälzung   → 6-8h   (kalt, minimale Filterung)
+# 18-22°C  → 1,25 Umwälzung  → 8-10h  (Frühjahr/Herbst)
+# 22-26°C  → 1,75 Umwälzung  → 10-12h (Sommer normal)
+# 26-30°C  → 2,5 Umwälzungen → 12-16h (heißer Sommer)
+# > 30°C   → 24h Dauerbetrieb        (Hochsommer)
 # ============================================================
 
 template:
@@ -161,6 +202,74 @@ template:
             {% endif %}
           {% else %}
             Sensor nicht verbunden
+          {% endif %}
+          
+      - name: "Pool - Empfohlene Filterlaufzeit"
+        unit_of_measurement: "h"
+        icon: mdi:water-pump
+        unique_id: pool_recommended_runtime
+        state: >
+          {% set pool_size = states('input_number.pool_size_config') | float(50000) %}
+          {% set pump_flow = states('input_number.pool_pump_flow_config') | float(10000) %}
+          {% set current_temp = states('input_number.pool_current_temperature') | float(24) %}
+          
+          {% if pool_size == 0 or pump_flow == 0 %}
+            0
+          {% else %}
+            {% if current_temp < 18 %}
+              {% set umwälzungen = 1 %}
+            {% elif current_temp < 22 %}
+              {% set umwälzungen = 1.25 %}
+            {% elif current_temp < 26 %}
+              {% set umwälzungen = 1.75 %}
+            {% elif current_temp < 30 %}
+              {% set umwälzungen = 2.5 %}
+            {% else %}
+              {% set umwälzungen = 24 %}
+            {% endif %}
+            
+            {% if current_temp >= 30 %}
+              24
+            {% else %}
+              {{ ((pool_size * umwälzungen) / pump_flow) | round(1) }}
+            {% endif %}
+          {% endif %}
+        
+      - name: "Pool - Temperatur-Kategorie"
+        icon: mdi:thermometer
+        unique_id: pool_temperature_category
+        state: >
+          {% set current_temp = states('input_number.pool_current_temperature') | float(24) %}
+          
+          {% if current_temp < 18 %}
+            🥶 Kalt (< 18°C) - 1 Umwälzung, 6-8h
+          {% elif current_temp < 22 %}
+            🌤️ Kühl (18-22°C) - 1-1,5 Umwälzungen, 8-10h
+          {% elif current_temp < 26 %}
+            ☀️ Angenehm (22-26°C) - 1,5-2 Umwälzungen, 10-12h
+          {% elif current_temp < 30 %}
+            🔥 Warm (26-30°C) - 2-3 Umwälzungen, 12-16h
+          {% else %}
+            🌡️ Sehr heiß (> 30°C) - Dauerbetrieb, 24h
+          {% endif %}
+          
+      - name: "Pool - Umwälzungen pro Tag"
+        unit_of_measurement: ""
+        icon: mdi:sync
+        unique_id: pool_circulations_per_day
+        state: >
+          {% set current_temp = states('input_number.pool_current_temperature') | float(24) %}
+          
+          {% if current_temp < 18 %}
+            1
+          {% elif current_temp < 22 %}
+            1.25
+          {% elif current_temp < 26 %}
+            1.75
+          {% elif current_temp < 30 %}
+            2.5
+          {% else %}
+            Dauerbetrieb
           {% endif %}
 
 # ============================================================

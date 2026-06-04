@@ -223,7 +223,41 @@ views:
       - type: vertical-stack
         cards:
           - type: heading
-            heading: Konfiguration
+            heading: Pool-Konfiguration
+
+          - type: entities
+            entities:
+              - entity: input_number.pool_size_config
+                name: Pool-Größe (L)
+              
+              - entity: input_number.pool_pump_flow_config
+                name: Pumpendurchsatz (L/h)
+              
+              - entity: input_number.pool_current_temperature
+                name: Aktuelle Wasser-Temperatur
+
+          - type: heading
+            heading: Empfohlene Laufzeit
+
+          - type: horizontal-stack
+            cards:
+              - type: custom:button-card
+                entity: sensor.pool_recommended_runtime
+                name: Laufzeit
+                icon: mdi:water-pump
+                
+              - type: custom:button-card
+                entity: sensor.pool_umwälzungen_pro_tag
+                name: Umwälzungen
+                icon: mdi:sync
+
+          - type: custom:markdown-card
+            content: |
+              **Temperatur-Kategorie:**
+              {{ state_attr('sensor.pool_temperature_category', 'state') or states('sensor.pool_temperature_category') }}
+
+          - type: heading
+            heading: Weitere Einstellungen
 
           - type: entities
             entities:
