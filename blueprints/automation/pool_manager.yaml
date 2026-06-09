@@ -235,30 +235,43 @@ variables:
   temp_sensor: !input temperature_sensor
   bath_duration: !input bath_pause_duration
   filter_duration: !input manual_filter_duration
+  pv_sensor: !input pv_sensor
+  pv_threshold: !input pv_threshold
+  pv_max_minutes: !input pv_max_additional_minutes
   bath_active_entity: !input bath_pause_active_entity
   bath_remaining_entity: !input bath_pause_remaining_entity
   manual_remaining_entity: !input manual_runtime_remaining_entity
 
-  # Aktuelle Temperatur (mit Fallback 20°C)
+  # === TEMPERATUR & BUDGET-BERECHNUNG ===
+  # Aktuelle Temperatur (mit Fallback 20°C bei fehlendem/unkown Sensor)
   water_temp: >
-    {% if temp_sensor != '' and states(temp_sensor) != 'unknown' %}
+    {% if temp_sensor != '' and states(temp_sensor) not in ['unknown', 'unavailable'] %}
       {{ states(temp_sensor) | float(20) }}
     {% else %}
       20
     {% endif %}
 
-  # PV-Überschuss
-  pv_sensor: !input pv_sensor
-  pv_threshold: !input pv_threshold
-  pv_max_minutes: !input pv_max_additional_minutes
-  pv_available: >
-    {% if pv_sensor != '' and states(pv_sensor) != 'unknown' and states(pv_sensor) | float(0) >= pv_threshold %}
-      true
+  # Empfohlene Umwälzungen pro Tag basierend auf Temperatur
+  # < 15°C: 1,0×  |  15-20°C: 1,5×  |  20-24°C: 2×  |  24-28°C: 2,5×  |  > 28°C: 3×
+  umwaelzungen: >
+    {% set t = water_temp | float %}
+    {% if t < 15 %}
+      1.0
+    {% elif t <= 20 %}
+      1.5
+    {% elif t <= 24 %}
+      2.0
+    {% elif t <= 28 %}
+      2.5
     {% else %}
-      false
+      3.0
     {% endif %}
 
-  # Ist die Badepause aktiv? (über Helper oder delay-Status)
+  # Benötigte Laufzeit in Minuten (Budget)
+  budget_minuten: >
+    {{ ((umwaelzungen | float) * pool_volume / pump_flow * 60) | round(0) | int }}
+
+  # Ist die Badepause aktiv? (über Helper)
   bath_pause_active: >
     {% if bath_active_entity != '' %}
       {{ is_state(bath_active_entity, 'on') }}
@@ -267,7 +280,7 @@ variables:
     {% endif %}
 
 trigger:
-  # Zeitfenster-Trigger
+  # Zeitfenster-Start (pro Wochentag)
   - platform: time
     at: !input monday_start
     id: "monday_start"
@@ -311,11 +324,6 @@ trigger:
     at: !input sunday_end
     id: "sunday_end"
 
-  # Stündliche Prüfung
-  - platform: time_pattern
-    minutes: "0"
-    id: "hourly_check"
-
   # Pumpe manuell ausgeschaltet (Badepause)
   - platform: state
     entity_id: !input pump_switch
@@ -328,17 +336,18 @@ trigger:
     to: "on"
     id: "pump_turned_on"
 
-  # PV-Überschuss-Änderung
+  # PV-Überschuss-Änderung (mit 5 Minuten Verzögerung gegen Toggeln)
   - platform: state
     entity_id: !input pv_sensor
-    id: "pv_change"
+    id: "pv_above_threshold"
+    for:
+      minutes: 5
 
 condition: []
 
 action:
   - variables:
       # Prüfen ob die Automation die Pumpe gesteuert hat oder der Benutzer
-      # Dazu: War der vorherige Zustand "an" und es ist ein Zeitfenster-Ende?
       was_automated: >
         {{ trigger.from_state is defined and
            trigger.from_state.context is defined and
@@ -377,7 +386,6 @@ action:
                   minutes: "{{ bath_duration }}"
 
               # Nach Badepause: Pumpe wieder anschalten
-              # (beim nächsten Zeitfenster-Ende schaltet die Automation ggf. aus)
               - if:
                   - condition: template
                     value_template: "{{ is_state(pump_switch, 'off') }}"
@@ -413,9 +421,7 @@ action:
               - condition: template
                 value_template: "{{ not was_automated }}"
             then:
-              # Prüfen ob die Pumpe außerhalb des Zeitfensters eingeschaltet wurde
-              - variables:
-                  in_time_window: false
+              # Helper aktualisieren (optional)
               - if:
                   - condition: template
                     value_template: "{{ manual_remaining_entity != '' }}"
@@ -430,7 +436,7 @@ action:
               - delay:
                   minutes: "{{ filter_duration }}"
 
-              # Nach Filterung: Pumpe aus (außer Zeitfenster ist noch aktiv)
+              # Nach Filterung: Pumpe aus
               - if:
                   - condition: template
                     value_template: "{{ is_state(pump_switch, 'on') }}"
@@ -449,43 +455,7 @@ action:
                     data:
                       value: 0
 
-      # === PV-ÜBERSCHUSS FILTERUNG ===
-      - conditions:
-          - condition: trigger
-            id:
-              - "pv_change"
-          - condition: template
-            value_template: "{{ pv_available and pv_sensor != '' and not bath_pause_active }}"
-        sequence:
-          # Prüfen ob Pumpe bereits läuft
-          - if:
-              - condition: template
-                value_template: "{{ is_state(pump_switch, 'off') }}"
-            then:
-              # Pumpe einschalten (PV-Überschuss)
-              - service: switch.turn_on
-                target:
-                  entity_id: "{{ pump_switch }}"
-
-              # Warten bis PV-Überschuss weg ist (unter Schwellwert), maximal pv_max_minutes
-              - wait_for_trigger:
-                  - platform: state
-                    entity_id: "{{ pv_sensor }}"
-                    below: "{{ pv_threshold }}"
-                timeout:
-                  minutes: "{{ pv_max_minutes }}"
-                continue_on_timeout: true
-
-              # Nach PV-Filterung: Pumpe aus (PV-Überschuss ist weg oder Zeit abgelaufen)
-              - if:
-                  - condition: template
-                    value_template: "{{ is_state(pump_switch, 'on') }}"
-                then:
-                  - service: switch.turn_off
-                    target:
-                      entity_id: "{{ pump_switch }}"
-
-      # === ZEITFENSTER START ===
+      # === ZEITFENSTER START: Temperatur messen, Budget berechnen, Pumpe an ===
       - conditions:
           - condition: trigger
             id:
@@ -505,15 +475,41 @@ action:
               {% set trigger_day = trigger_id.split('_')[0] %}
               {{ day_map[trigger_day] == now().weekday() }}
           # Keine Badepause aktiv
+          - condition: template
+            value_template: "{{ not bath_pause_active }}"
+
+          # Temperatur-Warnung (wenn kein Sensor)
           - if:
               - condition: template
-                value_template: "{{ not bath_pause_active }}"
+                value_template: "{{ temp_sensor == '' }}"
             then:
-              - service: switch.turn_on
+              - service: notify.persistent_notification
+                data:
+                  title: "🌡️ Pool-Manager: Kein Temperatursensor"
+                  message: >
+                    Es wurde kein Temperatursensor konfiguriert.
+                    Es wird von 20°C Wassertemperatur ausgegangen.
+                    Für optimale Filterung bitte einen Temperatur-Sensor angeben.
+
+          # Pumpe einschalten
+          - service: switch.turn_on
+            target:
+              entity_id: "{{ pump_switch }}"
+
+          # Budget-Zeit abwarten (Pumpe läuft für berechnete Dauer)
+          - delay:
+              minutes: "{{ budget_minuten }}"
+
+          # Nach Budget-Ende: Pumpe aus, sofern Zeitfenster noch nicht zu Ende ist
+          - if:
+              - condition: template
+                value_template: "{{ is_state(pump_switch, 'on') }}"
+            then:
+              - service: switch.turn_off
                 target:
                   entity_id: "{{ pump_switch }}"
 
-      # === ZEITFENSTER ENDE ===
+      # === ZEITFENSTER ENDE: Pumpe aus ===
       - conditions:
           - condition: trigger
             id:
@@ -532,77 +528,44 @@ action:
               {% set trigger_id = trigger.id %}
               {% set trigger_day = trigger_id.split('_')[0] %}
               {{ day_map[trigger_day] == now().weekday() }}
-          # Nur ausschalten, wenn keine Badepause aktiv und kein PV-Überschuss
+          # Nur ausschalten, wenn keine Badepause aktiv
           - condition: template
             value_template: "{{ not bath_pause_active }}"
+          - service: switch.turn_off
+            target:
+              entity_id: "{{ pump_switch }}"
+
+      # === PV-ÜBERSCHUSS: Nur nach Budget-Ende, innerhalb Zeitfenster ===
+      - conditions:
+          - condition: trigger
+            id: "pv_above_threshold"
+        sequence:
+          # Prüfen: Pumpe aktuell aus? (Budget ist aufgebraucht)
+          - condition: template
+            value_template: "{{ is_state(pump_switch, 'off') }}"
+          # Nicht in Badepause
+          - condition: template
+            value_template: "{{ not bath_pause_active }}"
+          # PV-Überschuss vorhanden
+          - condition: template
+            value_template: >
+              {{ pv_sensor != '' and states(pv_sensor) not in ['unknown', 'unavailable'] and
+                 states(pv_sensor) | float(0) >= pv_threshold }}
+
+          # Pumpe einschalten (PV-Überschuss)
+          - service: switch.turn_on
+            target:
+              entity_id: "{{ pump_switch }}"
+
+          # PV-Zusatzfilterung (maximal pv_max_minutes)
+          - delay:
+              minutes: "{{ pv_max_minutes }}"
+
+          # Nach PV-Filterung: Pumpe aus
           - if:
               - condition: template
-                value_template: "{{ not pv_available }}"
+                value_template: "{{ is_state(pump_switch, 'on') }}"
             then:
               - service: switch.turn_off
                 target:
                   entity_id: "{{ pump_switch }}"
-
-      # === STÜNDLICHE PRÜFUNG MIT LAUFZEIT-BERECHNUNG ===
-      - conditions:
-          - condition: trigger
-            id: "hourly_check"
-        sequence:
-          # Temperatur-Warnung (wenn kein Sensor)
-          - if:
-              - condition: template
-                value_template: "{{ temp_sensor == '' }}"
-            then:
-              - service: notify.persistent_notification
-                data:
-                  title: "🌡️ Pool-Manager: Kein Temperatursensor"
-                  message: >
-                    Es wurde kein Temperatursensor konfiguriert.
-                    Es wird von 20°C Wassertemperatur ausgegangen.
-                    Für optimale Filterung bitte einen Sensor angeben.
-
-          # Laufzeit-Berechnung basierend auf Temperatur
-          - variables:
-              current_temp: "{{ water_temp }}"
-
-              # Empfohlene Umwälzungen pro Tag
-              # Staffelung nach Temperatur:
-              # < 15°C: 1,0×  |  15-20°C: 1,5-2×  |  20-24°C: 2×  |  24-28°C: 2,5-3×  |  > 28°C: 3-4×
-              umwaelzungen: >
-                {% if current_temp < 15 %}
-                  1.0
-                {% elif current_temp <= 20 %}
-                  1.5
-                {% elif current_temp <= 24 %}
-                  2.0
-                {% elif current_temp <= 28 %}
-                  2.5
-                {% else %}
-                  3.0
-                {% endif %}
-
-              # Benötigte Laufzeit in Stunden
-              benoetigte_laufzeit_h: >
-                {{ ((umwaelzungen | float) * pool_volume / pump_flow) | round(1) }}
-
-              # Status
-              filter_status: >
-                {% if is_state(pump_switch, 'on') %}✅ Pumpe läuft{% else %}⏸️ Pumpe aus{% endif %}
-
-          # Benachrichtigung mit Zusammenfassung
-          - service: notify.persistent_notification
-            data:
-              title: "🏊 Pool-Manager: Status"
-              message: >
-                **Wassertemperatur:** {{ current_temp }}°C
-
-                **Empfohlene Umwälzungen:** {{ umwaelzungen }}× pro Tag
-
-                **Benötigte Laufzeit:** {{ benoetigte_laufzeit_h }} h
-
-                **Status:** {{ filter_status }}
-
-                ℹ️ Bei {{ current_temp }}°C: {{ umwaelzungen }}× Umwälzung/Tag
-
-                💡 Tipp: Passe die Zeitfenster so an, dass die Pumpe
-                mindestens {{ benoetigte_laufzeit_h }} h pro Tag läuft.
