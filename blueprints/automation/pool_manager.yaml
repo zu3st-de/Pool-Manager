@@ -330,12 +330,11 @@ action:
               - delay:
                   minutes: "{{ bath_duration }}"
 
-              # Nach Badepause: Pumpe wieder an (wenn Zeitfenster noch aktiv)
+              # Nach Badepause: Pumpe wieder anschalten
+              # (beim nächsten Zeitfenster-Ende schaltet die Automation ggf. aus)
               - if:
                   - condition: template
-                    value_template: >
-                      {{ is_state(pump_switch, 'off') and
-                         as_timestamp(now()) < as_timestamp(today_at('{{ states('sensor.time') }}')) }}
+                    value_template: "{{ is_state(pump_switch, 'off') }}"
                 then:
                   - service: switch.turn_on
                     target:
