@@ -173,6 +173,36 @@ blueprint:
         entity:
           domain: sensor
 
+    pv_sensor:
+      name: PV-Überschuss-Sensor (optional)
+      description: "Sensor für verfügbaren PV-Überschuss in Watt"
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
+    pv_threshold:
+      name: PV-Überschuss Schwellwert (Watt)
+      description: Ab dieser Leistung wird die Pumpe zusätzlich eingeschaltet
+      default: 2000
+      selector:
+        number:
+          min: 0
+          max: 50000
+          step: 100
+          unit_of_measurement: W
+
+    pv_max_additional_minutes:
+      name: Maximale zusätzliche Filterung bei PV (Minuten)
+      description: Wie lange die Pumpe maximal zusätzlich läuft, wenn PV-Überschuss vorhanden ist
+      default: 120
+      selector:
+        number:
+          min: 0
+          max: 600
+          step: 10
+          unit_of_measurement: min
+
     # === OPTIONALE HELPER FÜR DASHBOARD ===
     bath_pause_active_entity:
       name: Badepause-Aktiv (input_boolean, optional)
@@ -215,6 +245,17 @@ variables:
       {{ states(temp_sensor) | float(20) }}
     {% else %}
       20
+    {% endif %}
+
+  # PV-Überschuss
+  pv_sensor: !input pv_sensor
+  pv_threshold: !input pv_threshold
+  pv_max_minutes: !input pv_max_additional_minutes
+  pv_available: >
+    {% if pv_sensor != '' and states(pv_sensor) != 'unknown' and states(pv_sensor) | float(0) >= pv_threshold %}
+      true
+    {% else %}
+      false
     {% endif %}
 
   # Ist die Badepause aktiv? (über Helper oder delay-Status)
@@ -286,6 +327,11 @@ trigger:
     entity_id: !input pump_switch
     to: "on"
     id: "pump_turned_on"
+
+  # PV-Überschuss-Änderung
+  - platform: state
+    entity_id: !input pv_sensor
+    id: "pv_change"
 
 condition: []
 
@@ -403,6 +449,37 @@ action:
                     data:
                       value: 0
 
+      # === PV-ÜBERSCHUSS FILTERUNG ===
+      - conditions:
+          - condition: trigger
+            id:
+              - "pv_change"
+          - condition: template
+            value_template: "{{ pv_available and pv_sensor != '' and not bath_pause_active }}"
+        sequence:
+          # Prüfen ob Pumpe bereits läuft
+          - if:
+              - condition: template
+                value_template: "{{ is_state(pump_switch, 'off') }}"
+            then:
+              # Pumpe einschalten (PV-Überschuss)
+              - service: switch.turn_on
+                target:
+                  entity_id: "{{ pump_switch }}"
+
+              # PV-Zusatzfilterung Timer
+              - delay:
+                  minutes: "{{ pv_max_minutes }}"
+
+              # Nach PV-Filterung: Pumpe aus (PV-Überschuss ist weg oder Zeit abgelaufen)
+              - if:
+                  - condition: template
+                    value_template: "{{ is_state(pump_switch, 'on') }}"
+                then:
+                  - service: switch.turn_off
+                    target:
+                      entity_id: "{{ pump_switch }}"
+
       # === ZEITFENSTER START ===
       - conditions:
           - condition: trigger
@@ -450,12 +527,16 @@ action:
               {% set trigger_id = trigger.id %}
               {% set trigger_day = trigger_id.split('_')[0] %}
               {{ day_map[trigger_day] == now().weekday() }}
-          # Nur ausschalten, wenn keine Badepause aktiv
+          # Nur ausschalten, wenn keine Badepause aktiv und kein PV-Überschuss
           - condition: template
             value_template: "{{ not bath_pause_active }}"
-          - service: switch.turn_off
-            target:
-              entity_id: "{{ pump_switch }}"
+          - if:
+              - condition: template
+                value_template: "{{ not pv_available }}"
+            then:
+              - service: switch.turn_off
+                target:
+                  entity_id: "{{ pump_switch }}"
 
       # === STÜNDLICHE PRÜFUNG MIT LAUFZEIT-BERECHNUNG ===
       - conditions:
